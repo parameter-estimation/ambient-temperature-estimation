@@ -30,5 +30,5 @@ double optimizer_objective_function(unsigned n, const double *current_params, do
         printf("%i: rmse:%.5f h:%.6f q:%.6f T_amb_0:%.6f T_dev_0:%.6f\n",
                extra->step_count, rmse, params.h, params.q, params.T_amb_0, params.T_dev_0);
     }
-    return lossStatistic;
+    return sse;
 }

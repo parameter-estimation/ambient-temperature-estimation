@@ -74,7 +74,6 @@ optimizer_result_t Optimizer::fit()
     }
 
     double minimum_value;
-    // cout << "starting nlopt" << std::endl;
     int nloptResult = nlopt_optimize(opt, params, &minimum_value);
 
     if (m_settings.verbose) {
@@ -107,7 +106,7 @@ optimizer_result_t Optimizer::fit()
         optimizer_model_params_t fitted_params = map_param_array_to_struct(params);
         result.fitted_params = fitted_params;
 
-        // Generate data from the fitted parameters so we can compute RMSE of fit for absolute and differential data
+        // Generate data from the fitted parameters so we can compute RMSE etc
         modeled_state_timeseries_t fitted_data;
         fitted_data.t = std::vector<double>(m_data_buffer.rows.size());
         fitted_data.x = std::vector<std::vector<double>>(m_data_buffer.rows.size(), std::vector<double>(get_num_modeled_dimensions()));
