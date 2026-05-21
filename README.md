@@ -1,6 +1,6 @@
 # ambient-temperature-estimation
 
-This repository demonstrates using a Python Extension to train and predict with a C++ thermodynamic model from a Jupyter environment.
+This repository demonstrates using a custom Python harness to train and predict with a C++ thermodynamic model from a Jupyter environment.
 
 ## Credits
 
