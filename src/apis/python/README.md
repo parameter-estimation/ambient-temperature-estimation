@@ -1,25 +1,26 @@
-
 # Optimizer Python API
 
-This Python module is a native extension that wraps the C++ Optimizer library, enabling direct use of high-performance C++ code from Python. This approach allows the same core model and optimization logic to be used in both embedded/edge deployments (C++) and flexible lab or research environments (Python/Jupyter), ensuring consistency and reducing code duplication.
+CPython extension that wraps the C++ Optimizer library. The C++ core is designed for edge deployment; this binding is the lab-side counterpart for calibration, analysis, and notebook-driven experimentation against the exact same model code that runs on-target.
 
-## Build Instructions
-
-To build the library from the source C++ files, run the following command from a terminal:
+## Build
 
 ```bash
 python setup.py build_ext --inplace
 ```
 
-This will rebuild the `.so` or `.dll` file, depending on your platform. The build links against NLopt and Boost, and uses the NumPy C-API for efficient data transfer.
+This produces a `.so` (or `.dll`) in place. The build links against NLopt and Boost and compiles the C++ sources from `../optimizer/` and `../optimizer_api.cpp` directly into the extension — no separate library install step.
+
+Requires Python 3.8 or 3.9 (the build uses `distutils`, removed in Python 3.12), NumPy, NLopt, and Boost.
 
 ## Usage
-
-Import the module in your Python code:
 
 ```python
 import ambient_optimizer_python_api as aopa
 ```
 
-You can then initialize the optimizer, feed time-series data, fit the model, and run predictions using the same C++ code that runs on-device. This enables rapid prototyping, interactive analysis, and reproducible research, all while guaranteeing that production and research environments use identical model logic.
+The module exposes five functions: `init`, `feed`, `fit`, `generate`, `version`. See the top-level [README](../../../README.md#python-api) for the call signatures, and `test.py` / `examples/*.ipynb` for worked examples.
 
+## Notes
+
+- `feed` and the NumPy interop currently copy element-by-element rather than sharing buffers — fine for calibration workloads, would want revisiting if pushed at high frequency.
+- The example `prediction.ipynb` references a CSV path (`../data/cr_20/csv/...`) that is not checked into this repo; point it at `data/long_chamber_data.csv` or your own logged trace.

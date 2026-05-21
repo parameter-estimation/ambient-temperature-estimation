@@ -1,83 +1,103 @@
-
 # Ambient Temperature Estimation
 
-A portfolio project implementing a physics-based temperature estimation engine in C++ with robust Python bindings.
+A physics-based temperature estimation engine written in C++ with a CPython/NumPy extension for calibration and analysis in Python.
+
+![Out-of-sample prediction of ambient temperature from device temperature on a real logged trace](ambient_calibration.png)
+
+*Out-of-sample run: the model recovers ambient temperature (green) from device temperature alone (blue), validated against the measured ambient trace (orange).*
 
 ## Overview
 
-This repository demonstrates a cross-environment approach to scientific modeling: the core thermodynamic model and optimizer are written in C++ for maximum performance and portability, while a native Python extension exposes the same codebase for interactive analysis, rapid prototyping, and lab automation. This enables seamless reuse of the exact same C++ logic in both embedded/edge deployments and flexible Python-driven research workflows (e.g., Jupyter, data science pipelines).
+The model and optimizer are written in portable C++17 so the same fitted parameters and inference code can be deployed to resource-constrained edge devices. This repository contains the model, optimizer, lab-side Python bindings, and example notebooks — the embedded toolchain and on-device integration live outside this repo.
 
-The project combines a custom ODE solver, derivative-free parameter fitting, and a CPython/NumPy extension so the model can be trained and evaluated from Python or C++ with no code duplication.
+The split is deliberate: calibrate in Python against logged or synthetic data, then ship the same C++ inference code to the target.
 
+## Model
 
-## What it does
+Single-state thermal ODE for a device coupled to ambient:
 
-- Fits a compact thermal model to time-series temperature data
-- Uses a custom ODE describing device temperature dynamics driven by ambient temperature
-- Calibrates physical parameters such as heat transfer coefficient `h`, constant input `q`, and initial device temperature `T_dev_0`
-- Computes model quality using RMSE over observed vs. simulated temperature traces
-- Supports both `train` and `predict` modes through separate model subclasses
-- Enables the same C++ code to be used in both edge (embedded) and lab (Python) environments, reducing maintenance and ensuring consistency
+```
+dT_dev/dt = h · (T_amb − T_dev) + q
+```
 
+- `h` — heat transfer coefficient (fit)
+- `q` — constant input term, e.g. self-heating (fit)
+- `T_dev_0`, `T_amb_0` — initial conditions
+
+`src/apis/python/examples/model_derivation.ipynb` derives the closed-form solution symbolically with SymPy.
+
+## Modes
+
+Two `Optimizer` subclasses, selected via the `model` setting:
+
+- **`train`** — fits `h`, `q`, `T_dev_0` from a `[T_dev, T_amb]` time series
+- **`predict`** — given fixed `h`, `q` from a prior fit, estimates `T_dev_0` and `T_amb_0` from a `T_dev` time series alone (the use case where ambient is not directly measured on-device)
 
 ## Technology stack
 
-- C++17 for high-performance numerical modeling
-- Boost.Odeint for adaptive integration of the thermal ODE
-- NLopt (Nelder-Mead) for derivative-free optimization of model parameters
-- Native CPython extension using `Python.h` and NumPy C-API for zero-copy data transfer
-- CMake for native build targets
-- Python `setup.py` wrapper for building the extension in-place
-
+- C++17 numerical core
+- Boost.Odeint (Runge–Kutta Dormand–Prince 5) for adaptive ODE integration
+- NLopt Nelder–Mead for derivative-free parameter fitting (`xtol_rel = 1e-8`)
+- CPython extension (`Python.h` + NumPy C-API) for the lab-side bindings
+- CMake for native targets; `setup.py` for the Python extension
 
 ## Repository structure
 
-- `src/headers/` — library interfaces and shared data structures
-- `src/optimizer/` — fitting, solver, and objective function implementation
-- `src/models/` — training/prediction model subclasses and physics definitions
-- `src/apis/` — public optimizer API layer
-- `src/apis/python/` — Python wrapper and packaging (enables cross-environment use)
-- `src/test/` — smoke tests for model behavior and training/prediction flow
-- `data/` — sample time-series data
+- `src/headers/` — public interfaces and shared types
+- `src/optimizer/` — fitting, ODE solver, objective function, data buffer
+- `src/models/` — `BaseModelTrain` and `BaseModelPredict` subclasses
+- `src/apis/optimizer_api.cpp` — public C++ API layer
+- `src/apis/python/` — CPython extension, `setup.py`, example notebooks
+- `src/test/` — `SmokeTestTrain`, `SmokeTestPredict` native binaries
+- `data/long_chamber_data.csv` — sample logged `Tdev,Tamb` trace
 
+## Build
 
-## Build instructions
-
-### Native C++ build
+### Native C++ targets
 
 ```bash
 cmake .
-make
+make SmokeTestTrain SmokeTestPredict
+./SmokeTestTrain
+./SmokeTestPredict
 ```
 
-### Python wrapper (cross-environment)
+The CMake config currently hard-codes `/usr/local/lib/libnlopt.dylib`, so non-macOS builds need to adjust [CMakeLists.txt](CMakeLists.txt).
+
+### Python extension
 
 ```bash
 cd src/apis/python
 python setup.py build_ext --inplace
 ```
 
-### Requirements
+Requires Python 3.8 or 3.9 (the build uses `distutils`, which was removed in Python 3.12), NumPy, NLopt, and Boost.
 
-- Python 3
-- NumPy
-- NLopt
-- Boost (Boost.Odeint)
+## Python API
 
+After building, the extension exposes `ambient_optimizer_python_api`:
 
-## Usage
+```python
+import ambient_optimizer_python_api as aopa
 
-- Run native smoke test targets to validate training and prediction behavior
-- Use the Python extension module `ambient_optimizer_python_api` to: initialize the optimizer, feed time-series data, fit the model, and solve/predict with fitted parameters
-- In both edge and lab environments, the same C++ code is used for model logic, ensuring results are consistent and reproducible across deployment targets
+aopa.init({
+    "model": "train",          # or "predict"
+    "verbose": True,
+    "initial_guesses": [],     # required for predict: [T_amb_0 guess]
+    "fixed_parameters": [],    # required for predict: [h, q]
+})
 
+for t, (T_dev, T_amb) in enumerate(samples):
+    aopa.feed(t, [T_dev, T_amb])   # predict mode feeds [T_dev] only
 
-## Notes
+result = aopa.fit()
+# -> {"is_valid", "rmse", "icount", "ifault", "fitted_params": {h, q, T_dev_0, T_amb_0}}
 
-- The current implementation is a single-state physical model with ambient coupling
-- The Python wrapper exposes low-level optimizer control and data ingestion via NumPy-compatible arrays
-- The CMake targets currently link `libnlopt.dylib` from `/usr/local/lib`, so environment paths may need adjustment
-- This project demonstrates a best-practice pattern for scientific/engineering code: write core logic in C++ for portability and performance, then wrap with Python for usability and rapid iteration
+generated = aopa.generate(h, q, T_dev_0)
+# -> {"length", "t": np.ndarray, "x": np.ndarray}
+```
+
+See `src/apis/python/test.py` for an end-to-end synthetic round-trip, and `src/apis/python/examples/` for Jupyter walkthroughs (`calibration.ipynb`, `prediction.ipynb`, `model_derivation.ipynb`).
 
 ## Credits
 
